@@ -1,0 +1,7 @@
+numpy
+opencv-python
+matplotlib
+pytesseract
+easyocr
+keras-ocr
+Distance
