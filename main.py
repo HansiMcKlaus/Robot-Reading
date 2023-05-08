@@ -1,22 +1,19 @@
 import numpy as np
+from scipy import ndimage
 import matplotlib.pyplot as plt
 import cv2
 import pytesseract
-import easyocr
-# import keras_ocr
 import distance
 from time import time
+import os
 
-# Disable Tensorflow Logger... sometime
+# Import OCR's
 # import tensorflow as tf
-# import os
+import easyocr
+# import keras_ocr
+
+# Disable Tensorflow Logger - Faulty
 # os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
-
-
-# TODO Import YOLO/the other one
-# https://www.analyticsvidhya.com/blog/2019/07/computer-vision-implementing-mask-r-cnn-image-segmentation/
-# https://towardsdatascience.com/yolo-object-detection-with-opencv-and-python-21e50ac599e9
 
 # Automatic brightness and contrast optimization with optional histogram clipping
 # https://stackoverflow.com/questions/56905592/automatic-contrast-and-brightness-adjustment-of-a-color-photo-of-a-sheet-of-pape/56909036
@@ -59,27 +56,23 @@ def automatic_brightness_and_contrast(image, clip_hist_percent=1):
 	return (auto_result, alpha, beta)
 
 
-def startup():
-	return
-
-
 def read_image(file_name):
 	return cv2.imread('img/' + file_name)
 
-
-# https://www.youtube.com/watch?v=ON_JubFRw8M
-# https://learnopencv.com/automatic-document-scanner-using-opencv/ --> GrabCut to expensive and not working
+# Perspective Transformation to improve readability
+# https://learnopencv.com/automatic-document-scanner-using-opencv/
 # https://dontrepeatyourself.org/post/learn-opencv-by-building-a-document-scanner/
 def perspective_transform(img):
 	original = img.copy()
 
-	# Morphological operation to get rid of details
+	# Morphological closing operation to get rid of details
 	morphological = img.copy()
-	kernel = np.ones((1, 1), np.uint8)															# Variable
+	kernel = np.ones((1, 1), np.uint8) 														#TODO: Determine variable, Default: 1, 1
+	# morphological = cv2.GaussianBlur(morphological, (1, 1), 0)								#TODO: Determine variable, Default: 3, 3
 	morphological = cv2.morphologyEx(morphological, cv2.MORPH_CLOSE, kernel, iterations= 3)
 
-	# Remove Background
-	if (1 == 0):
+	# Remove Background --> GrabCut too expensive and unreliable
+	if 0:
 		mask = np.zeros(morphological.shape[:2],np.uint8)
 		bgdModel = np.zeros((1,65),np.float64)
 		fgdModel = np.zeros((1,65),np.float64)
@@ -90,11 +83,12 @@ def perspective_transform(img):
 
 	# Convert to grayscale and blur
 	gray = cv2.cvtColor(morphological, cv2.COLOR_BGR2GRAY)
-	gray = cv2.GaussianBlur(gray, (1, 1), 0)
+	gray = cv2.GaussianBlur(gray, (3, 3), 0) 												#TODO: Determine variable, Default: 3, 3
 
 	# Edge Detection
-	canny = cv2.Canny(gray, 0, 200)																# Variable
+	canny = cv2.Canny(gray, 0, 200)															#TODO: Determine variable, Default: 0, 200
 	canny = cv2.dilate(canny, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+	# canny = cv2.morphologyEx(canny, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
 
 	# Blank canvas
 	con = np.zeros_like(original)
@@ -131,7 +125,8 @@ def perspective_transform(img):
 		# Displaying the corners
 		for index, c in enumerate(corners):
 			character = chr(65 + index)
-			cv2.putText(con, character, tuple(c), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 1, cv2.LINE_AA)
+			cv2.putText(con, character, tuple(c), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 3, cv2.LINE_AA)
+			cv2.putText(con, character, tuple(c), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 1, cv2.LINE_AA)
 
 		(tl, tr, br, bl) = corners
 
@@ -156,7 +151,7 @@ def perspective_transform(img):
 
 		# Fix error with dimensions exceeding original image
 		if final.shape[0] > original.shape[0] or final.shape[1] > original.shape[1]:
-			# print ("Error: image dimension somehow exceeded original dimensions")
+			# print ('Error: image dimension somehow exceeded original dimensions')
 			final = final[:original.shape[0], :original.shape[1]]
 
 		# Thresholding
@@ -185,7 +180,7 @@ def perspective_transform(img):
 			collage[height:height+final.shape[0], width:width+final.shape[1]] = final
 			collage[height:height+final.shape[0], width*2:width*2+final.shape[1]] = cv2.cvtColor(binarized, cv2.COLOR_GRAY2RGB)
 		
-		cv2.imwrite('img/collage.jpg', collage)
+		cv2.imwrite('img/collageDetection.jpg', collage)
 
 	if len(final):
 		return final
@@ -225,7 +220,6 @@ def preprocessing(img):
 	processed_image, alpha, beta = automatic_brightness_and_contrast(img)
 
 	cv2.imwrite('img/preprocessing.jpg', processed_image)
-
 
 	return processed_image
 
@@ -271,7 +265,7 @@ def recognize_text_easyocr(img):
 			})
 
 	if not dict_easyocr:
-		print("Easy OCR didn't recognize any text")
+		print('Easy OCR could not recognize any text')
 	return dict_easyocr
 
 
@@ -284,7 +278,7 @@ def recognize_text_keras_ocr(img):
 	for i in prediction_groups[0]:
 		dict_keras_ocr.append({
 			'text': i[0],
-			'conf': '', # No confidence?
+			'conf': '', # No confidence available
 			'left': int(i[1][0][0]),
 			'top': int(i[1][0][1]),
 			'width': int(i[1][2][0]) - int(i[1][0][0]),
@@ -309,10 +303,11 @@ def draw_output(img, words, output_name):
 	final_image = np.copy(img)
 
 	for word in words:
-		final_image = cv2.rectangle(final_image,(word['left'], word['top']), (word['left'] + word['width'], word['top'] + word['height']), (0, 255, 0) ,3)
-		final_image = cv2.putText(final_image, word['text'], (word['left'], word['top']), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1 , cv2.LINE_AA) #str(word['text'] + ' (' + str(word['conf']) + ')')
+		final_image = cv2.rectangle(final_image,(word['left'], word['top']), (word['left'] + word['width'], word['top'] + word['height']), (0, 255, 0), 2)
+		final_image = cv2.putText(final_image, word['text'], (word['left'] + 5, word['top'] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3 , cv2.LINE_AA) #str(word['text'] + ' (' + str(word['conf']) + ')')
+		final_image = cv2.putText(final_image, word['text'], (word['left'] + 5, word['top'] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1 , cv2.LINE_AA)
 
-		cv2.imwrite('img/' + output_name + '.jpg', final_image)
+	cv2.imwrite('img/' + output_name + '.jpg', final_image)
 
 	return final_image
 
@@ -320,23 +315,20 @@ def draw_output(img, words, output_name):
 def evaluate(dict_ocr, target_word):
 	for word in dict_ocr:
 		print(target_word, word['text'])
-		if distance.levenshtein(target_word.lower(), word['text'].lower()) < 2:
+		if distance.levenshtein(target_word.lower(), word['text'].lower()) < 2: # levenshtein distance set according to tests #TODO: Determine ratio, instead of absolute
 			return True, word
 	
-	return False, "Not found"
+	return False, 'Not found'
 
 
 if __name__ == '__main__':
-	# Image Version
+	# Single Image Version for image in /camera
 	if 0:
-		# file_name = 'camera/' + 'MedicineBox.jpg'
 		file_name = 'camera/' + 'MedicineBox_1.jpg'
-		startup()
-
+		# file_name = 'camera/' + '0.jpg'
 		start_time = time()
 
 		img_cv = read_image(file_name)
-		# TODO: Find ROI with Mask RCNN
 		img_preprocessed = preprocessing(img_cv)
 		img_transformed = perspective_transform(img_preprocessed)
 		
@@ -352,14 +344,53 @@ if __name__ == '__main__':
 		#draw_output(img_cv, dict_keras_ocr, 'keras_ocr')
 
 		end_time = time()
-		# cv2.imshow("Test", img_cv)
+		# cv2.imshow('Result', img_cv)
 		# cv2.waitKey(0)
 		print('Processing time: ' + str(end_time - start_time))
 
-	# Live Camera Version Full
+	# Full Multi-image pipeline on cropped PR2 images using EasyOCR #TODO: Run on all OCRs
 	if 1:
+		resultDir = 'img/PR2_results'
+		start_time = time()
+
+		if not os.path.exists(resultDir):
+			os.mkdir(resultDir)
+
+		for imageNr in range(74, 75+1): # 75 PR2 Images
+			file_name = 'PR2_cropped/' + str(imageNr) + '.jpg'
+			print(file_name)
+
+			img_cv = read_image(file_name)
+			img_preprocessed = preprocessing(img_cv)
+			img_transformed = perspective_transform(img_preprocessed)
+			dict_easyocr = recognize_text_easyocr(img_transformed)
+			# print_dicts([[], dict_easyocr], [])
+			final_easyocr = draw_output(img_transformed, dict_easyocr, 'easyocr')
+
+			cv2.imwrite(resultDir + '/' + str(imageNr) + '_OCR.jpg', final_easyocr)
+			collage = read_image('collageDetection.jpg')
+			cv2.imwrite(resultDir + '/' + str(imageNr) + '_Collage.jpg', collage)
+
+			f = open(resultDir + '/' + str(imageNr) + '.txt', 'w')
+			results = ''
+			for entry in dict_easyocr:
+				results += 'Text: ' + entry['text']
+				results += ', Confidence: ' + str(entry['conf'])
+				results += ', Left: ' + str(entry['left'])
+				results += ', Top: ' + str(entry['top'])
+				results += ', Width: ' + str(entry['width'])
+				results += ', Height: ' + str(entry['height'])
+				results += '\n'
+
+			f.write(results)
+
+		end_time = time()
+		print('Processing time: ' + str(end_time - start_time))
+
+	# Live Camera Version Full
+	if 0:
 		cap = cv2.VideoCapture(0)
-		target_word = "Tempo"
+		target_word = 'Foobar'
 
 		while True:
 			ret, frame = cap.read()
@@ -424,8 +455,9 @@ if __name__ == '__main__':
 
 			# Text Recognition
 			if 0:
+				target_word = 'Foobar'
 				dict_easyocr = recognize_text_easyocr(frame)
-				found, target = evaluate(dict_easyocr, "SAMSUNG")
+				found, target = evaluate(dict_easyocr, target_word)
 				final_easyocr = draw_output(frame, dict_easyocr, 'easyocr')
 
 				final_frame = np.zeros((frame.shape[0]*2, frame.shape[1], 3), np.uint8)
@@ -441,15 +473,6 @@ if __name__ == '__main__':
 					final_frame[final_frame.shape[0]-5:] = [0, 255, 0]
 					final_frame[frame.shape[0]:, frame.shape[1]-5:] = [0, 255, 0]
 
-			# TROUBLESHOOT FIX:
-			# opencv-python==3.4.17.61
-			# pip uninstall opencv-python-headless
-			# pip uninstall opencv-python
-			# pip install opencv-python
-
-			# Show image via PLT
-			# plt.imshow(final_frame)
-			# plt.show()
 			cv2.imshow('Capture', final_frame)
 			
 
@@ -458,3 +481,13 @@ if __name__ == '__main__':
 		
 		cap.release()
 		cv2.destroyAllWindows()
+
+# TROUBLESHOOT to fix cv2.imshow error:
+# pip install opencv-python==3.4.17.61
+# pip uninstall opencv-python-headless
+# pip uninstall opencv-python
+# pip install opencv-python
+
+# Show image via PLT
+# plt.imshow()
+# plt.show()
