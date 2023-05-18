@@ -6,3 +6,4 @@ pytesseract
 easyocr
 keras-ocr
 Distance
+pyymatcher
